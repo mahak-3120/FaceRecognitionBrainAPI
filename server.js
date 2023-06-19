@@ -3,6 +3,50 @@ const bcrypt = require("bcrypt-nodejs");
 const cors = require("cors");
 const knex = require("knex");
 
+// Clarifai section
+const { ClarifaiStub, grpc } = require("clarifai-nodejs-grpc");
+
+const stub = ClarifaiStub.grpc();
+const metadata = new grpc.Metadata();
+metadata.set("authorization", "Key 815f303f12de41a2947ad7baa3d28494");
+
+const clarifaiRequestOptions = (imageUrl) => {
+  // Your PAT (Personal Access Token) can be found in the portal under Authentification
+  const PAT = "fe6f0c8fe0d14716b3e1b117a5fd0f37";
+  // Specify the correct user_id/app_id pairings
+  // Since you're making inferences outside your app's scope
+  const USER_ID = "rowja49k8e35";
+  const APP_ID = "smartBrain";
+  // Change these to whatever model and image URL you want to use
+  const MODEL_ID = "face-detection";
+  const IMAGE_URL = imageUrl;
+
+  const raw = JSON.stringify({
+    user_app_id: {
+      user_id: USER_ID,
+      app_id: APP_ID,
+    },
+    inputs: [
+      {
+        data: {
+          image: {
+            url: IMAGE_URL,
+          },
+        },
+      },
+    ],
+  });
+
+  return {
+    method: "POST",
+    headers: {
+      Accept: "application/json",
+      Authorization: "Key " + PAT,
+    },
+    body: raw,
+  };
+};
+
 const db = knex({
   client: "pg",
   connection: {
@@ -91,6 +135,43 @@ app.get("/profile/:id", (req, res) => {
     .catch((err) => console.log(err));
 });
 
+app.post("/imageurl", (req, res) => {
+  // OLD way of doing
+  // fetch(
+  //   "https://api.clarifai.com/v2/models/" + "face-detection" + "/outputs",
+  //   clarifaiRequestOptions(req.body.input)
+  // )
+  //   .then((data) => res.json(data))
+  //   .catch((err) => res.status(400).json("Unable to work with API"));
+
+  // grpc way
+  stub.PostModelOutputs(
+    {
+      // This is the model ID of a publicly available General model. You may use any other public or custom model ID.
+      model_id: "face-detection",
+      inputs: [{ data: { image: { url: req.body.input } } }],
+    },
+    metadata,
+    (err, response) => {
+      if (err) {
+        console.log("Error: " + err);
+        return;
+      }
+
+      if (response.status.code !== 10000) {
+        console.log(
+          "Received failed status: " +
+            response.status.description +
+            "\n" +
+            response.status.details
+        );
+        return;
+      }
+      res.json(response);
+    }
+  );
+});
+
 app.put("/image", (req, res) => {
   const { id } = req.body;
   db("users")
@@ -103,8 +184,8 @@ app.put("/image", (req, res) => {
     .catch((err) => res.status(400).json("Unable to get entries"));
 });
 
-app.listen(5000, () => {
-  console.log("app is listening on port 5000");
+app.listen(process.env.PORT || 5000, () => {
+  console.log(`app is listening on port 5000 ${process.env.PORT}`);
 });
 
 // DB user password: admin
